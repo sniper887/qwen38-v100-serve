@@ -103,7 +103,8 @@ if [[ -n "${CUDA_HOME:-}" ]]; then
     fi
 fi
 
-if [[ -n "${GCC_HOME:-}" && -d "${GCC_HOME}/lib" ]]; then
+GCC_HOME="${GCC_HOME:-${GCC13_HOME:-}}"
+if [[ -n "${GCC_HOME}" && -d "${GCC_HOME}/lib" ]]; then
     export LD_LIBRARY_PATH="${GCC_HOME}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 fi
 
