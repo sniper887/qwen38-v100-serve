@@ -1,0 +1,22 @@
+# Build directories & scratch
+build/
+builds/
+llama.cpp/
+.cache/
+ccache/
+
+# Local environment and secret configs
+.env
+serve.env
+*.local.env
+
+# Models and weights
+*.gguf
+*.bin
+models/
+
+# Logs & profiles
+*.log
+*.nsys-rep
+*.ncu-rep
+*.sqlite

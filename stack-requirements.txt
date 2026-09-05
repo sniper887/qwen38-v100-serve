@@ -1,0 +1,85 @@
+# ==============================================================================
+# Stack Requirements Specification: Qwen3.8-27B Serving on NVIDIA Volta (sm_70)
+# ==============================================================================
+# This file serves as the definitive requirements manifest for building and
+# running optimized Qwen3.8-27B inference on NVIDIA Volta GPUs (e.g. Tesla V100).
+# Tools such as check-env.sh and build.sh parse or validate against these specs.
+
+[hardware]
+# NVIDIA compute capability sm_70 (Volta). Tested on Tesla V100 32GB (SXM2/PCIe).
+gpu_arch                = sm_70
+gpu_name                = NVIDIA Tesla V100 (32GB recommended; 16GB supported up to 32K ctx)
+vram_min_gb             = 16
+vram_recommended_gb     = 32
+host_ram_min_gb         = 32
+storage_recommended     = SSD / NVMe (Model size: ~16.5 GB; cold loads from HDD take ~90s vs ~30s on SSD)
+
+[driver]
+# CRITICAL: Driver branch R580 (580.xx) is the FINAL driver release branch supporting Volta.
+# Upgrading driver packages past 580.xx permanently removes sm_70 GPU support.
+nvidia_driver_min       = 525.60.13
+nvidia_driver_max       = 580.999
+nvidia_driver_recommended = 580.142
+
+[cuda_toolkit]
+# CRITICAL: CUDA 13.x removed offline compilation and execution support for sm_70.
+# The toolchain MUST use CUDA 12.x (12.0 - 12.9).
+cuda_version_min        = 12.0
+cuda_version_max        = 12.9.86
+cuda_target_arch        = 70
+required_libs           = libcudart.so.12, libcublas.so.12, libcuda.so.1
+
+[host_compiler]
+# Host GCC/G++ must be compatible with CUDA 12.x nvcc.
+# GCC 14+ or GCC 16 produces header errors (e.g., char8_t / libstdc++ incompatibilities).
+gcc_version_min         = 11.0
+gcc_version_max         = 13.4.99
+recommended_toolchain   = gcc-13 / g++-13
+
+[build_tools]
+cmake                   = >= 3.22.0
+git                     = >= 2.25.0
+make_or_ninja           = make >= 4.0 or ninja >= 1.10
+ccache                  = >= 3.7.0 (recommended to accelerate rebuilds)
+
+[upstream_llama_cpp]
+# Source git repository and verified pinned reference commit / tag
+repository_url          = https://github.com/ggml-org/llama.cpp.git
+pinned_tag              = b10793
+pinned_commit           = d230ddd9d48b7834575fb635e9854ef2436d4187
+build_type              = Release
+cmake_flags             = -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=70
+
+[patches]
+# Optimized 3-head GQA packing for non-speculative decode on models where gqa_ratio % 3 == 0
+t2_001_gqa_packing      = patches/0001-t2-001-gqa-packing-sm70.patch
+t2_001_target_file      = ggml/src/ggml-cuda/fattn-vec.cuh
+
+[model]
+# Model weights specification for Qwen3.8-27B with embedded MTP draft head
+model_family            = Qwen3.8
+model_size              = 27B
+recommended_quant       = Qwen3.8-27B-UD-Q4_K_M.gguf
+approx_size_gb          = 16.45
+huggingface_repo        = unsloth/Qwen3.8-27B-GGUF
+# Structural requirements for kernel alignment and MTP support:
+num_layers              = 65 (64 base hybrid layers + blk.64 MTP head)
+hybrid_layers           = 48 GatedDeltaNet linear-attention layers (recurrent state, no KV cache)
+full_attention_layers   = 16 full-attention layers (full_attention_interval = 4)
+q_heads                 = 24
+kv_heads                = 4
+gqa_ratio               = 6
+head_dim                = 256
+mtp_head_tensor_prefix  = blk.64.nextn
+
+[runtime_flags]
+# Optimal serving flags verified through empirical profiling:
+offload                 = -ngl 999
+flash_attention         = -fa on
+batch_size              = -b 2048 -ub 2048
+kv_cache_types          = -ctk f16 -ctv f16
+parallel_slots          = --parallel 1
+prompt_caching          = --cache-prompt
+speculative_mtp         = --spec-type draft-mtp (when MTP enabled)
+default_context         = 131072 (128K tokens)
+default_draft_max       = 3 (optimal 0-64K; use 7 for pure 128K context)
