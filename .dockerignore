@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+builds/
+llama.cpp/
+*.o
+*.a
+*.so
+
+# Environment files
+.env
+serve.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (optional, keep README small)
+# README.md
