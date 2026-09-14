@@ -1,0 +1,136 @@
+name: Build and Push Docker Image
+
+# 手动触发：在 Actions 页面点击 "Run workflow" 即可拉取最新上游代码并构建推送
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_branch:
+        description: '上游仓库分支'
+        required: true
+        default: 'main'
+      image_tag:
+        description: '镜像标签（留空则使用 latest + 短 commit hash）'
+        required: false
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ---------------------------------------------------------------
+      # Step 1: 检出本仓库（fork）
+      # ---------------------------------------------------------------
+      - name: Checkout forked repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------------------------------------------------------------
+      # Step 2: 配置 Git 用户信息
+      # ---------------------------------------------------------------
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # ---------------------------------------------------------------
+      # Step 3: 添加上游仓库并拉取最新代码
+      # ---------------------------------------------------------------
+      - name: Pull latest from upstream
+        run: |
+          UPSTREAM_BRANCH="${{ github.event.inputs.upstream_branch }}"
+          echo "Syncing from upstream jackinthebox52/qwen38-v100-serve @ ${UPSTREAM_BRANCH}..."
+
+          git remote add upstream https://github.com/jackinthebox52/qwen38-v100-serve.git || true
+          git fetch upstream "${UPSTREAM_BRANCH}"
+
+          # 合并上游最新代码到当前分支（保留我们的 Dockerfile 和 workflow）
+          git merge "upstream/${UPSTREAM_BRANCH}" --allow-unrelated-histories --no-edit || {
+            echo "::warning::Merge conflicts detected, attempting strategy ours for workflow files..."
+            # 如果有冲突，优先保留我们的 .github 和 Dockerfile
+            git checkout --ours -- .github/ Dockerfile 2>/dev/null || true
+            git add -A
+            git commit --no-edit || true
+          }
+
+          # 推送到本仓库
+          git push origin HEAD:main
+          echo "Upstream sync complete."
+
+      # ---------------------------------------------------------------
+      # Step 4: 获取最新 commit hash 用于镜像标签
+      # ---------------------------------------------------------------
+      - name: Get image metadata
+        id: meta
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          CUSTOM_TAG="${{ github.event.inputs.image_tag }}"
+          if [ -n "$CUSTOM_TAG" ]; then
+            echo "tag=$CUSTOM_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------
+      # Step 5: 设置 Docker Buildx
+      # ---------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ---------------------------------------------------------------
+      # Step 6: 登录到 GitHub Container Registry (GHCR)
+      # ---------------------------------------------------------------
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------------------------------------------------------------
+      # Step 7: 构建并推送 Docker 镜像
+      # ---------------------------------------------------------------
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.meta.outputs.short_sha }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ---------------------------------------------------------------
+      # Step 8: 输出构建结果
+      # ---------------------------------------------------------------
+      - name: Build summary
+        run: |
+          echo "## Docker 镜像构建完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **镜像地址**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit 标签**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ steps.meta.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **上游分支**: \`${{ github.event.inputs.upstream_branch }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 拉取镜像" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 运行容器" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker run --gpus all -v /path/to/models:/models -e MODEL=/models/Qwen3.8-27B.gguf -p 8080:8080 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
