@@ -29,10 +29,12 @@ RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
  && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
 # CUDA stubs: libcuda.so is not available in the container without NVIDIA driver.
-# Create symlink and set LIBRARY_PATH so the linker can find the stub library.
+# Create symlinks (both .so and .so.1) and set library paths so the linker
+# can resolve libggml-cuda.so's dependency on libcuda.so.1.
 RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so \
- && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so.1 2>/dev/null || true
+ && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1
 ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH:-}
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH:-}
 ENV CMAKE_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
 
 WORKDIR /build
