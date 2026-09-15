@@ -28,6 +28,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
  && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
 
+# CUDA stubs: libcuda.so is not available in the container without NVIDIA driver.
+# Create symlink and set LIBRARY_PATH so the linker can find the stub library.
+RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so \
+ && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so.1 2>/dev/null || true
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH:-}
+ENV CMAKE_LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
 WORKDIR /build
 
 # Copy project files (build script, patches, serve scripts)
