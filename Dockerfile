@@ -58,6 +58,17 @@ RUN BUILDS_DIR=/build/builds \
     CUDA_ARCH=70 \
     ./build.sh --all
 
+# Post-build: collect shared libraries (libllama-server-impl.so, etc.)
+# llama.cpp recently split llama-server implementation into a separate .so.
+# Copy all .so files next to each binary so the runtime image can find them.
+RUN for variant in stock patched; do \
+        build_dir="/build/builds/${variant}"; \
+        mkdir -p "${build_dir}/lib"; \
+        # Copy .so from bin/ and lib/ build output dirs
+        find "${build_dir}" -maxdepth 3 -name "*.so*" -type f -exec cp -n {} "${build_dir}/lib/" \; 2>/dev/null || true; \
+        echo "[builder] ${variant} libs:"; ls -la "${build_dir}/lib/" 2>/dev/null || echo "(none)"; \
+    done
+
 # ------------------------------------------------------------------------------
 # Stage 2: Runtime
 # ------------------------------------------------------------------------------
@@ -79,9 +90,14 @@ COPY serve.env.example ./
 COPY check-env.sh ./
 RUN chmod +x serve.sh check-env.sh
 
-# Copy compiled binaries from builder
+# Copy compiled binaries and shared libraries from builder
 COPY --from=builder /build/builds/stock/bin/llama-server   /app/builds/stock/bin/llama-server
 COPY --from=builder /build/builds/patched/bin/llama-server /app/builds/patched/bin/llama-server
+COPY --from=builder /build/builds/stock/lib/    /app/builds/stock/lib/
+COPY --from=builder /build/builds/patched/lib/  /app/builds/patched/lib/
+
+# Make shared libraries discoverable at runtime
+ENV LD_LIBRARY_PATH=/app/builds/stock/lib:/app/builds/patched/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 
 # Backward-compatible symlink (T2-001-gqa-packing -> patched)
 RUN ln -sf patched /app/builds/T2-001-gqa-packing
